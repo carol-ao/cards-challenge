@@ -10,7 +10,7 @@ import java.util.List;
 @NoArgsConstructor
 @Getter
 @Setter
-public class Pile implements Serializable {
+public class DrawnCards implements Serializable {
 
     private boolean success;
     private String deck_id;

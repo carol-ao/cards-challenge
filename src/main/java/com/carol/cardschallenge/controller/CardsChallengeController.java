@@ -1,5 +1,6 @@
 package com.carol.cardschallenge.controller;
 
+import com.carol.cardschallenge.domain.Result;
 import com.carol.cardschallenge.service.DeckofCardsAPIService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -15,8 +16,7 @@ public class CardsChallengeController {
     private DeckofCardsAPIService deckofCardsAPIService;
 
     @GetMapping
-    public ResponseEntity<Void> run(){
-        deckofCardsAPIService.run();
-        return ResponseEntity.ok().build(); //change to return Result
+    public ResponseEntity<Result> run(){
+        return ResponseEntity.ok().body(deckofCardsAPIService.run());
     }
 }

@@ -10,9 +10,9 @@ import lombok.*;
 public class Card {
 
     private String code;
-//    private String image;
-//        private Images images;
-//        private String value;
-//        private String suit;
 
+    @Override
+    public String toString() {
+        return "\'"+ code + "\'";
+    }
 }
