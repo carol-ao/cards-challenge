@@ -9,13 +9,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 
@@ -32,19 +30,24 @@ public class DeckofCardsAPIService {
     @Autowired
     private DeckRepository deckRepository;
 
-    private HttpEntity<String> entity;
-
+    @Autowired
     private RestTemplate restTemplate;
+
+    private HttpEntity httpEntity = getHttpEntity();
 
     public Result run() throws DeckOfCardsAPIErrorException {
 
-        configureRestTemplate();
+        Deck deck = getDeck(httpEntity);
 
-        Deck deck = getDeck();
+        shuffleDeck(deck, httpEntity);
 
-        deck = shuffleDeck(deck);
+        DrawnCards drawnCards = drawCards(deck, httpEntity);
 
-        DrawnCards drawnCards = drawCards(deck);
+        if (drawnCards.getRemaining() < (DECK_SIZE - (CARDS_PER_HAND * NUMBER_OF_PLAYERS))) {
+            returnCardsToDeck(deck, httpEntity);
+        }
+
+        updateDeck(deck);
 
         final int[] maxScore = {Integer.MIN_VALUE};
 
@@ -57,79 +60,78 @@ public class DeckofCardsAPIService {
         return result;
     }
 
-    // NEXT STEPS:
-    // exceptions handler
-    // make tests
 
-
-    private void configureRestTemplate() {
-        restTemplate = new RestTemplate();
+    private HttpEntity getHttpEntity() {
         HttpHeaders headers = new HttpHeaders();
-        headers.add("user-agent", "Application");
-        entity = new HttpEntity<>(headers);
+        headers.add("user-agent", "CardsChallengeApplication");
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        return new HttpEntity<>(headers);
     }
 
-    private Deck getDeck() throws DeckOfCardsAPIErrorException {
+    private Deck getDeck(HttpEntity httpEntity) throws DeckOfCardsAPIErrorException {
+
         Optional<Deck> savedDeck = deckRepository.findTopByOrderByIdDesc();
         Deck deck = null;
         if (!savedDeck.isPresent()) {
             try {
-                deck = restTemplate.exchange("https://deckofcardsapi.com/api/deck/new/shuffle/?deck_count=1", HttpMethod.GET, entity, Deck.class).getBody();
+                deck = restTemplate.exchange("https://deckofcardsapi.com/api/deck/new/shuffle/?deck_count=1", HttpMethod.GET, httpEntity, Deck.class).getBody();
             } catch (Exception e) {
                 throw new DeckOfCardsAPIErrorException("Could neither retrieve deck nor get a new one to play : error when Calling API.");
             }
-
-            deckRepository.save(deck);
+            updateDeck(deck);
         } else {
             deck = savedDeck.get();
         }
+
         return deck;
     }
 
-    private Deck shuffleDeck(Deck deck) throws DeckOfCardsAPIErrorException {
+    private void shuffleDeck(Deck deck, HttpEntity httpEntity) throws DeckOfCardsAPIErrorException {
         ReturnOrShuffleResponse shuffleResponse =
                 restTemplate.exchange("https://deckofcardsapi.com/api/deck/" + deck.getDeck_id() + "/shuffle/?remaining=true",
-                        HttpMethod.GET, entity, ReturnOrShuffleResponse.class).getBody();
+                        HttpMethod.GET, httpEntity, ReturnOrShuffleResponse.class).getBody();
 
-        if (!shuffleResponse.isSuccess()) {
+        if (shuffleResponse != null && !shuffleResponse.isSuccess()) {
             throw new DeckOfCardsAPIErrorException("Could not shuffle cards before drawing: API returned payload but could not shuffle the cards..");
         }
 
-        return deck;
     }
 
-    private DrawnCards drawCards(Deck deck) throws DeckOfCardsAPIErrorException {
+    private DrawnCards drawCards(Deck deck, HttpEntity httpEntity) throws DeckOfCardsAPIErrorException {
 
         DrawnCards drawnCards = null;
         try {
-           drawnCards= restTemplate.exchange("https://deckofcardsapi.com/api/deck/" + deck.getDeck_id() + "/draw/?count=" + CARDS_PER_HAND * NUMBER_OF_PLAYERS,
-                    HttpMethod.GET, entity, DrawnCards.class).getBody();
-        }catch(Exception e){
+            drawnCards = restTemplate.exchange("https://deckofcardsapi.com/api/deck/" + deck.getDeck_id() + "/draw/?count=" + CARDS_PER_HAND * NUMBER_OF_PLAYERS,
+                    HttpMethod.GET, httpEntity, DrawnCards.class).getBody();
+        } catch (Exception e) {
             throw new DeckOfCardsAPIErrorException("Could not draw cards : Error when calling API.");
         }
 
         if (Objects.isNull(drawnCards) || !drawnCards.isSuccess() || Objects.isNull(drawnCards.getCards()) || drawnCards.getCards().size() != CARDS_PER_HAND * NUMBER_OF_PLAYERS) {
-            throw new DeckOfCardsAPIErrorException("Failed to draw cards : API returned payload but could not draw the cards.");
+            throw new DeckOfCardsAPIErrorException("Failed to draw cards : API responded but could not draw the cards.");
         }
 
         deck.setRemaining(drawnCards.getRemaining());
 
-        if (drawnCards.getRemaining() < (DECK_SIZE - (CARDS_PER_HAND * NUMBER_OF_PLAYERS))) {
+        return drawnCards;
+    }
 
-            //returning cards in api if not enough cards remain
-            ReturnOrShuffleResponse returnResponse = restTemplate.exchange("https://deckofcardsapi.com/api/deck/" + deck.getDeck_id() + "/return/", HttpMethod.GET, entity, ReturnOrShuffleResponse.class).getBody();
+    private void returnCardsToDeck(Deck deck, HttpEntity httpEntity) throws DeckOfCardsAPIErrorException {
 
-            if (!returnResponse.isSuccess()) {
-                throw new DeckOfCardsAPIErrorException("Could not return cards  : API returned payload but could not return the cards to the deck.");
-            }
+        ReturnOrShuffleResponse returnResponse = restTemplate.exchange("https://deckofcardsapi.com/api/deck/" + deck.getDeck_id() + "/return/", HttpMethod.GET, httpEntity, ReturnOrShuffleResponse.class).getBody();
 
-            //restoring deck size
-            deck.setRemaining(DECK_SIZE);
+        if (returnResponse != null && !returnResponse.isSuccess()) {
+            throw new DeckOfCardsAPIErrorException("Could not return cards  : API responded but could not return the cards to the deck.");
         }
 
-        deckRepository.save(deck);
+        deck.setRemaining(DECK_SIZE);
+    }
 
-        return drawnCards;
+    private void updateDeck(Deck deck) {
+
+        if (deck != null) {
+            deckRepository.save(deck);
+        }
     }
 
     private List<Player> getPlayersHands(DrawnCards drawnCards, final int[] maxScore) {
@@ -154,21 +156,21 @@ public class DeckofCardsAPIService {
     private Result getResult(List<Player> players, int maxScore) {
 
         List<Player> winners = players.stream().filter(player -> player.getScore() == maxScore).collect(Collectors.toList());
-        String result;
+        StringBuilder result;
         if (winners.size() > 1) {
-            result = "The result is a draw between " + winners.size() + " players with the score of " + winners.get(0).getScore() + ".";
+            result = new StringBuilder("The result is a draw between " + winners.size() + " players with the score of " + winners.get(0).getScore() + ".");
             for (int i = 0; i < winners.size(); ++i) {
-                result += " Player " + i + "'s cards: " + winners.get(i).getCards() + ";";
+                result.append(" Player ").append(i).append("'s cards: ").append(winners.get(i).getCards()).append(";");
             }
         } else {
-            result = "We have a winner with a score of " + winners.get(0).getScore() + " points. The winners cards are: " + winners.get(0).getCards();
+            result = new StringBuilder("We have a winner with a score of " + winners.get(0).getScore() + " points. The winners cards are: " + winners.get(0).getCards());
         }
         return Result.builder()
-                .result(result)
+                .result(result.toString())
                 .build();
     }
 
     public List<Result> getResultsHistory() {
-        return resultRepository.findAll();  // change to order by desc
+        return resultRepository.findAll();
     }
 }
