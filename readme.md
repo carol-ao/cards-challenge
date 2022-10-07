@@ -1,2 +1,2 @@
-<p> <b> Olá! Este projeto está pronto para entrega :) </b> </p>
-<em>...apesar de poder ser melhorado com a inclusão de testes unitários e refatoração, bem como uso do Feign</em>
+<p> <b> An endpoint to simulate a simple card game where 4 players draw 4 cards each from an ordinary 52-card deck to see who has the highest cards values.</b> </p>
+
